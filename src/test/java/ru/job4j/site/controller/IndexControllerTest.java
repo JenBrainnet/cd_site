@@ -17,6 +17,8 @@ import java.time.LocalDateTime;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.mockito.Mockito.when;
@@ -45,6 +47,8 @@ class IndexControllerTest {
     private InterviewsService interviewsService;
     @MockBean
     private AuthService authService;
+    @MockBean
+    private ProfilesService profilesService;
     @MockBean
     private VacancyStatisticService vacancyStatisticService;
     @MockBean
@@ -108,8 +112,8 @@ class IndexControllerTest {
         when(topicsService.getAllTopicLiteDTO()).thenReturn(Collections.emptyList());
         when(categoriesService.getMostPopular()).thenReturn(listCat);
         when(interviewsService.getLast()).thenReturn(listInterviews);
-        when(authService.findById(1)).thenReturn(profile1);
-        when(authService.findById(2)).thenReturn(profile2);
+        when(profilesService.getProfileById(1)).thenReturn(Optional.of(profile1));
+        when(profilesService.getProfileById(2)).thenReturn(Optional.of(profile2));
         when(vacancyStatisticService.getAll()).thenReturn(vacancyStatisticWithDates);
         var listBread = List.of(new Breadcrumb("Главная", "/"));
         mockMvc.perform(get("/index/")
@@ -119,6 +123,7 @@ class IndexControllerTest {
                         model().attribute("categories", listCat),
                         model().attribute("breadcrumbs", listBread),
                         model().attribute("topicsLiteMap", Collections.emptyMap()),
+                        model().attribute("authors", Map.of(1, profile1, 2, profile2)),
                         model().attribute("new_interviews", listInterviews),
                         model().attribute("vacancyStatistic", vacancyStatisticList),
                         model().attribute("vacancyStatisticLastUpdateDate", "22.04.2024 12:00"),
