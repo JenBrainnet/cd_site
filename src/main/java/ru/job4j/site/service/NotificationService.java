@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import ru.job4j.site.dto.*;
 import ru.job4j.site.util.RestAuthCall;
@@ -13,12 +14,22 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
+import static ru.job4j.site.configuration.NotificationKafkaTopics.FEEDBACK_INTERVIEW;
+import static ru.job4j.site.configuration.NotificationKafkaTopics.INNER_MESSAGE;
+import static ru.job4j.site.configuration.NotificationKafkaTopics.INTERVIEW_CANCEL;
+import static ru.job4j.site.configuration.NotificationKafkaTopics.INTERVIEW_PARTICIPANT_DISMISSED;
+import static ru.job4j.site.configuration.NotificationKafkaTopics.INTERVIEW_PARTICIPATE;
+import static ru.job4j.site.configuration.NotificationKafkaTopics.INTERVIEW_TOPIC;
+import static ru.job4j.site.configuration.NotificationKafkaTopics.NEW_INTERVIEW;
+import static ru.job4j.site.configuration.NotificationKafkaTopics.WISHER_APPROVED;
+
 @Service
 @Slf4j
 @AllArgsConstructor
 public class NotificationService {
 
     private final EurekaUriProvider uriProvider;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
     private static final String SERVICE_ID = "notification";
 
     public void addSubscribeCategory(String token, int userId, int categoryId) {
@@ -116,37 +127,16 @@ public class NotificationService {
 
     public void notifyAboutInterviewCreation(String token,
                                              CategoryWithTopicDTO categoryAndTopicIds) {
-        var mapper = new ObjectMapper();
-        try {
-            new RestAuthCall(String
-                    .format("%s/messages/newInterview", uriProvider.getUri(SERVICE_ID)))
-                    .post(token, mapper.writeValueAsString(categoryAndTopicIds));
-        } catch (Exception e) {
-            log.error("API notification not found, error: {}", e.getMessage());
-        }
+        sendNotificationEvent(NEW_INTERVIEW, categoryAndTopicIds);
     }
 
     public void sendFeedBackMessage(String token, InnerMessageDTO innerMessage) {
-        var url = String.format("%s/messages/message", uriProvider.getUri(SERVICE_ID));
-        var mapper = new ObjectMapper();
-        try {
-            new RestAuthCall(url).post(
-                    token, mapper.writeValueAsString(innerMessage));
-        } catch (Exception e) {
-            log.error("API notification not found, error: {}", e.getMessage());
-        }
+        sendNotificationEvent(INNER_MESSAGE, innerMessage);
     }
 
     public void sendFeedbackNotification(String token,
                                          FeedbackNotificationDTO feedbackNotification) {
-        var url = String.format("%s/feedback/interview", uriProvider.getUri(SERVICE_ID));
-        var mapper = new ObjectMapper();
-        try {
-            new RestAuthCall(url).post(
-                    token, mapper.writeValueAsString(feedbackNotification));
-        } catch (Exception e) {
-            log.error("API notification not found, error: {}", e.getMessage());
-        }
+        sendNotificationEvent(FEEDBACK_INTERVIEW, feedbackNotification);
     }
 
     /**
@@ -158,15 +148,7 @@ public class NotificationService {
      * @throws JsonProcessingException Exception
      */
     public void sendSubscribeTopic(String token, InterviewNotifyDTO interviewNotifyDTO) {
-        var url = String
-                .format("%s/notification/topic/", uriProvider.getUri(SERVICE_ID));
-        var mapper = new ObjectMapper();
-        try {
-            new RestAuthCall(url).post(
-                    token, mapper.writeValueAsString(interviewNotifyDTO));
-        } catch (Exception e) {
-            log.error("API notification not found, error: {}", e.getMessage());
-        }
+        sendNotificationEvent(INTERVIEW_TOPIC, interviewNotifyDTO);
     }
 
     /**
@@ -177,15 +159,7 @@ public class NotificationService {
      * @param wisherNotifyDTO WisherNotifyDTO
      */
     public void sendParticipateAuthor(String token, WisherNotifyDTO wisherNotifyDTO) {
-        var url = String
-                .format("%s/notification/participate/", uriProvider.getUri(SERVICE_ID));
-        var mapper = new ObjectMapper();
-        try {
-            new RestAuthCall(url).post(
-                    token, mapper.writeValueAsString(wisherNotifyDTO));
-        } catch (Exception e) {
-            log.error("API notification not found, error: {}", e.getMessage());
-        }
+        sendNotificationEvent(INTERVIEW_PARTICIPATE, wisherNotifyDTO);
     }
 
     /**
@@ -198,15 +172,7 @@ public class NotificationService {
      */
     public void sendParticipateCancelInterview(String token,
                                                CancelInterviewNotificationDTO cancelInterviewDTO) {
-        var url = String
-                .format("%s/notification/cancelInterview/", uriProvider.getUri(SERVICE_ID));
-        var mapper = new ObjectMapper();
-        try {
-            new RestAuthCall(url).post(
-                    token, mapper.writeValueAsString(cancelInterviewDTO));
-        } catch (Exception e) {
-            log.error("API notification not found, error: {}", e);
-        }
+        sendNotificationEvent(INTERVIEW_CANCEL, cancelInterviewDTO);
     }
 
     /**
@@ -219,26 +185,23 @@ public class NotificationService {
      */
     public void sendParticipantIsDismissed(String token,
                                            List<WisherDismissedDTO> wisherDismissedDTOList) {
-        var url = String
-                .format("%s/notification/participantIsDismissed/", uriProvider.getUri(SERVICE_ID));
-        var mapper = new ObjectMapper();
-        try {
-            new RestAuthCall(url).post(
-                    token, mapper.writeValueAsString(wisherDismissedDTOList));
-        } catch (Exception e) {
-            log.error("API notification not found, error: {}", e);
-        }
+        wisherDismissedDTOList.forEach(wisherDismissedDTO ->
+                sendNotificationEvent(INTERVIEW_PARTICIPANT_DISMISSED, wisherDismissedDTO));
     }
 
     public void approvedWisher(String token, WisherApprovedDTO wisherApprovedDTO) {
-        var url = String
-                .format("%s/notificationWisher/approvedWisher/", uriProvider.getUri(SERVICE_ID));
-        var mapper = new ObjectMapper();
         try {
-            var out = new RestAuthCall(url).post(
-                    token, mapper.writeValueAsString(wisherApprovedDTO));
+            sendNotificationEvent(WISHER_APPROVED, wisherApprovedDTO);
         } catch (Exception e) {
             log.error("API notification not found, error: {}", e.getMessage());
+        }
+    }
+
+    private void sendNotificationEvent(String topic, Object event) {
+        try {
+            kafkaTemplate.send(topic, event);
+        } catch (Exception e) {
+            log.error("Kafka notification send error, topic: {}, error: {}", topic, e.getMessage());
         }
     }
 }
